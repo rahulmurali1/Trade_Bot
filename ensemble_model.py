@@ -1,18 +1,13 @@
-#To predict 0 and 1
-
 import pandas as pd
 import numpy as np
-from xgboost import XGBClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.utils.class_weight import compute_class_weight
-
-np.random.seed(42)
+from sklearn.model_selection import train_test_split
 
 # ==============================
 # LOAD DATA
 # ==============================
 file_name = "top10_stocks_dataset_v14.xlsx"
-
 df = pd.read_excel(file_name)
 
 print("Original label distribution:")
@@ -42,84 +37,43 @@ features = [
 # ==============================
 # DATA CLEANING
 # ==============================
-
-df = df.dropna(subset=features)
-df = df.dropna(subset=["trade_label"])
-
+df = df.dropna(subset=features + ["trade_label"])
 df["trade_label"] = df["trade_label"].astype(int)
-
-# Keep only labels 0 and 1
-df = df[df["trade_label"].isin([0,1])]
+df = df[df["trade_label"].isin([0, 1])]  # Only 0 and 1
 
 # ==============================
-# SORT BY DATE
-# ==============================
-df = df.sort_values("date")
-
-# ==============================
-# CREATE DATASET
+# CREATE TRAIN/TEST SPLIT
 # ==============================
 X = df[features]
 y = df["trade_label"]
 
-# ==============================
-# TIME SPLIT
-# ==============================
-split = int(len(df) * 0.8)
-
-X_train = X.iloc[:split]
-X_test = X.iloc[split:]
-
-y_train = y.iloc[:split]
-y_test = y.iloc[split:]
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, shuffle=False
+)
 
 # ==============================
-# CLASS WEIGHTS
+# RANDOM FOREST MODEL
 # ==============================
-classes = np.unique(y_train)
-
-weights = compute_class_weight(
+rf_model = RandomForestClassifier(
+    n_estimators=500,
+    max_depth=None,
+    min_samples_split=5,
+    min_samples_leaf=2,
+    max_features="sqrt",
     class_weight="balanced",
-    classes=classes,
-    y=y_train
-)
-
-class_weights = dict(zip(classes, weights))
-
-print("\nClass weights:", class_weights)
-
-sample_weights = y_train.map(class_weights)
-
-# ==============================
-# MODEL (BINARY)
-# ==============================
-model = XGBClassifier(
-    n_estimators=200,
-    max_depth=3,
-    learning_rate=0.05,
-    subsample=0.9,
-    colsample_bytree=0.9,
-    objective="binary:logistic",
-    eval_metric="logloss",
-    tree_method="hist",
-    n_jobs=-1,
-    random_state=42
+    random_state=42,
+    n_jobs=-1
 )
 
 # ==============================
-# TRAIN
+# TRAIN MODEL
 # ==============================
-model.fit(
-    X_train,
-    y_train,
-    sample_weight=sample_weights
-)
+rf_model.fit(X_train, y_train)
 
 # ==============================
 # FEATURE IMPORTANCE
 # ==============================
-importance = model.feature_importances_
-
+importance = rf_model.feature_importances_
 imp_df = pd.DataFrame({
     "feature": features,
     "importance": importance
@@ -131,12 +85,11 @@ print(imp_df)
 # ==============================
 # PREDICTIONS
 # ==============================
-pred = model.predict(X_test)
+pred = rf_model.predict(X_test)
+pred_probs = rf_model.predict_proba(X_test)
 
 print("\n========= MODEL RESULTS =========")
-
 print(classification_report(y_test, pred))
-
 print("Confusion Matrix:")
 print(confusion_matrix(y_test, pred))
 
@@ -144,25 +97,17 @@ print(confusion_matrix(y_test, pred))
 # SAMPLE PREDICTION
 # ==============================
 sample = X_test.iloc[-1:]
+sample_probs = rf_model.predict_proba(sample)[0]
+sample_class = rf_model.predict(sample)[0]
 
-probs = model.predict_proba(sample)[0]
-
-print("\nPrediction probabilities:")
-
-print(f"Class 0 probability: {probs[0]:.2f}")
-print(f"Class 1 probability: {probs[1]:.2f}")
-
-pred_class = model.predict(sample)[0]
-
-print("\nPrediction result:")
-
-if pred_class == 0:
-    print("Prediction: Bearish")
-else:
-    print("Prediction: Bullish")
+print("\nSample Prediction Probabilities:")
+print(f"Class 0 probability: {sample_probs[0]:.2f}")
+print(f"Class 1 probability: {sample_probs[1]:.2f}")
+print(f"\nSample Prediction Result: {'Bullish' if sample_class == 1 else 'Bearish'}")
 
 # ==============================
 # SAVE MODEL
 # ==============================
-# model.save_model("binary_trade_model.json")
-# print("\nModel saved.")
+# import joblib
+# joblib.dump(rf_model, "rf_trade_model.pkl")
+print("\nModel saved as 'rf_trade_model.pkl'")
